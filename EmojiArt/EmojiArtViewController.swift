@@ -11,7 +11,62 @@ import UIKit
 class EmojiArtViewController: UIViewController, UIDropInteractionDelegate, UIScrollViewDelegate, UICollectionViewDataSource,
 UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewDragDelegate, UICollectionViewDropDelegate {
     
+    // MARK: - Model
+    
+    var emojiArt: EmojiArt? {
+        get {
+            if let url = emojiArtBackgroundImage.url {
+                let emojis = emojiArtView.subviews.flatMap { $0 as? UILabel }.flatMap { EmojiArt.EmojiInfo(label: $0) }
+                return EmojiArt(url: url, emojis: emojis)
+                
+            }
+            return nil
+        }
+        set {
+            emojiArtBackgroundImage = (nil, nil)
+            emojiArtView.subviews.flatMap { $0 as? UILabel }.forEach { $0.removeFromSuperview() }
+            if let url = newValue?.url {
+                imageFetcher = ImageFetcher(fetch: url) { (url, image) in
+                    DispatchQueue.main.async {
+                        self.emojiArtBackgroundImage = (url, image)
+                        newValue?.emojis.forEach {
+                            let attributedText = $0.text.attributedString(withTextStyle: .body, ofSize: CGFloat($0.size))
+                            self.emojiArtView.addLabel(with: attributedText, centeredAt: CGPoint(x: $0.x, y: $0.y))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Lifecycle methods
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        
+        if let url = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Untitled.json") {
+            if let jsonData = try? Data(contentsOf: url) {
+                emojiArt = EmojiArt(json: jsonData)
+            }
+        }
+        
+        
+    }
+    
     // MARK: - Storyboard
+    
+    @IBAction func save(_ sender: UIBarButtonItem) {
+        if let json = emojiArt?.json {
+            if let url = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Untitled.json") {
+                do {
+                    try json.write(to: url)
+                    print( "success in save")
+                } catch let error {
+                    print (error)
+                }
+            }
+        }
+    }
     
     @IBOutlet weak var dropZone: UIView! {
         didSet {
@@ -37,14 +92,19 @@ UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewDr
         scrollViewWidth.constant = scrollView.contentSize.width
     }
     
-    var emojiArtBackgroundImage: UIImage? {
+    // we make this a tuple
+    // so that whenever a background image is set
+    // we also capture the url of that image
+    
+    var emojiArtBackgroundImage: (url: URL?, image: UIImage?) {
         get {
-            return emojiArtView.backgroundImage
+            return (_emojiArtBackgroundImageURL, emojiArtView.backgroundImage)
         }
         set {
+            _emojiArtBackgroundImageURL = newValue.url
             scrollView?.zoomScale = 1.0
-            emojiArtView.backgroundImage = newValue
-            let size = newValue?.size ?? CGSize.zero
+            emojiArtView.backgroundImage = newValue.image
+            let size = newValue.image?.size ?? CGSize.zero
             emojiArtView.frame = CGRect(origin: CGPoint.zero, size: size)
             scrollView?.contentSize = size
             scrollViewHeight?.constant = size.height
@@ -54,6 +114,11 @@ UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewDr
             }
         }
     }
+    
+    // this starts with _ because it's not something we set directly
+    // the value of this is owned by the non-_ var emojiArtBackgroundImage
+    
+    private var _emojiArtBackgroundImageURL: URL?
     
     var emojiArtView = EmojiArtView()
     
@@ -229,7 +294,7 @@ UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewDr
         
         imageFetcher = ImageFetcher() { (url, image) in
             DispatchQueue.main.async {
-                self.emojiArtBackgroundImage = image
+                self.emojiArtBackgroundImage = (url, image)
             }
         }
         
@@ -243,6 +308,20 @@ UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewDr
             if let image = images.first as? UIImage {
                 self.imageFetcher.backup = image
             }
+        }
+    }
+}
+
+extension EmojiArt.EmojiInfo
+{
+    init?(label: UILabel) {
+        if let attributedText = label.attributedText, let font = attributedText.font {
+            x = Int(label.center.x)
+            y = Int(label.center.y)
+            text = attributedText.string
+            size = Int(font.pointSize)
+        } else {
+            return nil
         }
     }
 }
